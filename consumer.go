@@ -58,6 +58,7 @@ import (
 var configFilename string
 var offsetsRaw string
 var keepBufferFiles bool
+var debug bool
 
 func init() {
   flag.StringVar(&configFilename, "c", "conf.properties", "path to config file")
@@ -101,8 +102,8 @@ func main() {
   }
   
   // Read configuration file
-  debug, _ := config.GetBool("default", "debug")
   host, _ := config.GetString("kafka", "host")
+  debug, _ = config.GetBool("default", "debug")
   port, _ := config.GetString("kafka", "port")
   hostname := fmt.Sprintf("%s:%s", host, port)
   awsKey, _ := config.GetString("s3", "accesskey")
