@@ -104,6 +104,14 @@ func main() {
     brokers[i] = kafka.NewBrokerConsumer(hostname, topics[i], int(partitions[i]), uint64(offsets[i]), uint32(maxSize)) 
   }
   
+  if debug {
+    fmt.Printf("Making sure bufferfile path exists at %s", tempfilePath)
+  }
+  err = os.MkdirAll(tempfilePath, 0700)
+  if err != nil {
+    fmt.Errorf("Error ensuring buffer file path %s: %#v", tempfilePath, err)
+    panic(err)
+  }
   
   if debug {
     fmt.Printf("Created %d brokers, opening a buffer file for each.\n", len(brokers))
