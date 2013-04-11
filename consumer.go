@@ -59,6 +59,7 @@ var configFilename string
 var offsetsRaw string
 var keepBufferFiles bool
 var debug bool
+const ONE_MINUTE_IN_NANOS = 60000000000
 
 func init() {
   flag.StringVar(&configFilename, "c", "conf.properties", "path to config file")
@@ -66,42 +67,106 @@ func init() {
 	flag.BoolVar(&keepBufferFiles, "k", false, "keep buffer files around for inspection")
 }
 
-func saveToS3(s3bucket *s3.Bucket, bufferFile *os.File, topic *string, partition int64) (bool, error) {
+
+type ChunkBuffer struct {
+  File            *os.File
+  FilePath        *string
+  MaxAgeInMins    int64
+  MaxSizeInBytes  int64
+  Topic           *string
+  Partition       int64
+  Offset          int64
+  expiresAt       int64
+  length          int64
+}
+
+func (chunkBuffer *ChunkBuffer) BaseFilename() string {
+  return fmt.Sprintf("kafka-s3-go-consumer-buffer-topic_%s-partition_%d-offset_%d-", chunkBuffer.Topic, chunkBuffer.Partition, chunkBuffer.Offset)
+}
+
+func (chunkBuffer *ChunkBuffer) CreateBufferFileOrPanic() {
+  tmpfile, err := ioutil.TempFile(*chunkBuffer.FilePath, chunkBuffer.BaseFilename())
+  chunkBuffer.File = tmpfile
+  chunkBuffer.expiresAt = time.Now().UnixNano() + (chunkBuffer.MaxAgeInMins * ONE_MINUTE_IN_NANOS)
+  chunkBuffer.length = 0
+  if err != nil {
+    fmt.Errorf("Error opening buffer file: %#v\n", err)
+    panic(err)
+  }
+}
+
+func (chunkBuffer *ChunkBuffer) TooBig() bool {
+  return chunkBuffer.length >= chunkBuffer.MaxSizeInBytes
+}
+
+func (chunkBuffer *ChunkBuffer) TooOld() bool {
+  return time.Now().UnixNano() >= chunkBuffer.expiresAt
+}
+
+func (chunkBuffer *ChunkBuffer) NeedsRotation() bool {
+  return chunkBuffer.TooBig() || chunkBuffer.TooOld()
+}
+
+func (chunkBuffer *ChunkBuffer) Writeln(data []byte) {
+  chunkBuffer.File.Write(data)
+  chunkBuffer.File.Write([]byte("\n"))
+
+  chunkBuffer.length += int64(len(data)) + int64(len([]byte("\n")))
+}
+
+func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, error) {
   var s3path string
   var err error
   
+  if debug {
+    fmt.Printf("Closing bufferfile: %s\n", chunkBuffer.File.Name())
+  }
+  chunkBuffer.File.Close()
   
-  contents, err := ioutil.ReadFile(bufferFile.Name())
+  contents, err := ioutil.ReadFile(chunkBuffer.File.Name())
   if err != nil {
     return false, err
   }
   
   if len(contents) <= 0 {
     if debug {
-      fmt.Printf("Nothing to store to s3 for: %s\n", bufferFile.Name())
+      fmt.Printf("Nothing to store to s3 for bufferfile: %s\n", chunkBuffer.File.Name())
     }
     return true, nil
   }
   
   alreadyExists := true
   for alreadyExists {
-    s3path = fmt.Sprintf("%s/p%d/%d", *topic, partition, time.Now().UnixNano())
+    s3path = fmt.Sprintf("%s/p%d/%d", chunkBuffer.Topic, chunkBuffer.Partition, time.Now().UnixNano())
     alreadyExists, err = s3bucket.Exists(s3path)
-    // if err != nil {
-    //   panic(err)
-    //   return false, err
-    // }
+    if err != nil {
+      panic(err)
+      return false, err
+    }
   } 
 
   if debug {
-    fmt.Printf("Going to write to s3: %s//%s\n", s3bucket.Name, s3path)
+    fmt.Printf("Going to write to s3: %s.s3.amazonaws.com/%s\n", s3bucket.Name, s3path)
   }
-  err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(bufferFile.Name())), s3.Private)
+  err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())), s3.Private)
   if err != nil {
     panic(err)
   }
-  return (err != nil), err
+  
+  if !keepBufferFiles {
+    if debug {
+      fmt.Printf("Deleting bufferfile: %s\n", chunkBuffer.File.Name())
+    }
+    err = os.Remove(chunkBuffer.File.Name())
+    if err != nil {
+      fmt.Errorf("Error deleting bufferfile %s: %#v", chunkBuffer.File.Name(), err)
+    }
+  }
+  
+  return true, nil
 }
+
+
 
 func main() {
   // Read argv
@@ -115,6 +180,8 @@ func main() {
   // Read configuration file
   host, _ := config.GetString("kafka", "host")
   debug, _ = config.GetBool("default", "debug")
+  bufferMaxSizeInByes, _ := config.GetInt64("default", "maxchunksizebytes")
+  bufferMaxAgeInMinutes, _ := config.GetInt64("default", "maxchunkagemins")
   port, _ := config.GetString("kafka", "port")
   hostname := fmt.Sprintf("%s:%s", host, port)
   awsKey, _ := config.GetString("s3", "accesskey")
@@ -153,27 +220,29 @@ func main() {
   }
   
   if debug {
-    fmt.Printf("Making sure bufferfile path exists at %s\n", tempfilePath)
+    fmt.Printf("Making sure bufferfile directory structure exists at %s\n", tempfilePath)
   }
   err = os.MkdirAll(tempfilePath, 0700)
   if err != nil {
-    fmt.Errorf("Error ensuring buffer file path %s: %#v\n", tempfilePath, err)
+    fmt.Errorf("Error ensuring bufferfile directory structure %s: %#v\n", tempfilePath, err)
     panic(err)
   }
   
   if debug {
     fmt.Printf("Created %d brokers, opening a buffer file for each.\n", len(brokers))
   }
-  buffers := make([]*os.File, len(brokers))
+  buffers := make([]*ChunkBuffer, len(brokers))
   for i, _ := range brokers {
-    bufferFilename := fmt.Sprintf("kafka-s3-go-consumer-buffer-topic_%s-partition_%d-offset_%d-", topics[i], partitions[i], offsets[i])
-    buffers[i], err = ioutil.TempFile(tempfilePath, bufferFilename)
-    if err != nil {
-      fmt.Errorf("Error opening buffer file: %#v\n", err)
-      panic(err)
+    buffers[i] = &ChunkBuffer{FilePath: &tempfilePath, 
+      MaxSizeInBytes: bufferMaxSizeInByes, 
+      MaxAgeInMins: bufferMaxAgeInMinutes, 
+      Topic: &topics[i], 
+      Partition: partitions[i], 
+      Offset: offsets[i],
     }
+    buffers[i].CreateBufferFileOrPanic()
     if debug {
-      fmt.Printf("Consumer[%s #%d]:: buffer-file: %s\n", hostname, i, buffers[i].Name())
+      fmt.Printf("Consumer[%s#%d][bufferfile]: %s\n", hostname, i, buffers[i].File.Name())
     }
   }
 
@@ -197,11 +266,30 @@ func main() {
     for msg := range messageChannel {
       if msg != nil {
         if debug {
-          fmt.Printf("`%s` } ", topics[i])
+          fmt.Printf("`%s` { ", topics[i])
           msg.Print()
+          fmt.Printf("}\n")
         }
-        buffers[i].Write(msg.Payload())
-        buffers[i].Write([]byte("\n"))
+        buffers[i].Writeln(msg.Payload())
+        
+        // check for max size and max age ... if over, rotate
+        // to new buffer file and upload the old one.
+        if buffers[i].NeedsRotation()  {
+          rotatedOutBuffer := buffers[i]
+          buffers[i] = &ChunkBuffer{FilePath: &tempfilePath, 
+            MaxSizeInBytes: bufferMaxSizeInByes, 
+            MaxAgeInMins: bufferMaxAgeInMinutes, 
+            Topic: &topics[i], 
+            Partition: partitions[i], 
+            Offset: offsets[i],
+          }
+          buffers[i].CreateBufferFileOrPanic()
+          if debug {
+            fmt.Printf("Consumer[%s#%d][bufferfile]: %s\n", hostname, i, buffers[i].File.Name())
+          }
+          go rotatedOutBuffer.StoreToS3AndRelease(s3bucket)
+        }
+        
       } else {
         break
       }
@@ -210,31 +298,14 @@ func main() {
 
 
   cleanDoneSignals := make(chan bool, len(buffers))
-  for i, bufferFile := range buffers {
+  for _, bufferFile := range buffers {
     go func() {
-      if debug {
-        fmt.Printf("Closing buffer-file: %s\n", bufferFile.Name())
-      }
-      bufferFile.Close()
-    
-      // Write anything remaining to s3
-      saveToS3(s3bucket, bufferFile, &topics[i], partitions[i])
-    
-      if !keepBufferFiles {
-        if debug {
-          fmt.Printf("Deleting buffer-file: %s\n", bufferFile.Name())
-        }
-        err = os.Remove(bufferFile.Name())
-        if err != nil {
-          fmt.Errorf("Error deleting buffer file %s: %#v", bufferFile.Name(), err)
-        }
-      }
-
+      bufferFile.StoreToS3AndRelease(s3bucket)
       cleanDoneSignals <- true
     }()
-  
-    // wait for all cleanup
-    <-cleanDoneSignals
+  }
+  for _ = range buffers {
+    <-cleanDoneSignals // wait for all cleanup
   }
   
 
