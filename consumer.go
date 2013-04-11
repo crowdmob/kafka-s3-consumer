@@ -105,11 +105,11 @@ func main() {
   }
   
   if debug {
-    fmt.Printf("Making sure bufferfile path exists at %s", tempfilePath)
+    fmt.Printf("Making sure bufferfile path exists at %s\n", tempfilePath)
   }
   err = os.MkdirAll(tempfilePath, 0700)
   if err != nil {
-    fmt.Errorf("Error ensuring buffer file path %s: %#v", tempfilePath, err)
+    fmt.Errorf("Error ensuring buffer file path %s: %#v\n", tempfilePath, err)
     panic(err)
   }
   
@@ -121,7 +121,7 @@ func main() {
     bufferFilename := fmt.Sprintf("kafka-s3-go-consumer-buffer-topic_%s-partition_%d-offset_%d", topics[i], partitions[i], offsets[i])
     buffers[i], err = ioutil.TempFile(tempfilePath, bufferFilename)
     if err != nil {
-      fmt.Errorf("Error opening buffer file: %#v", err)
+      fmt.Errorf("Error opening buffer file: %#v\n", err)
       panic(err)
     }
     if debug {
