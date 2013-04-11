@@ -51,23 +51,28 @@ import (
 )
 
 var configFilename string
-var offset uint64
+var offsetsRaw string
+var keepBufferFiles bool
 
 func init() {
   flag.StringVar(&configFilename, "c", "conf.properties", "path to config file")
-	flag.Uint64Var(&offset, "offset", 0, "offset to start consuming from")
+	flag.StringVar(&offsetsRaw, "o", "0", "comma separated offsets to start consuming from for each topic")
+	flag.BoolVar(&keepBufferFiles, "k", false, "keep buffer files around for inspection")
 }
 
 func main() {
+  // Read argv
   flag.Parse()
   config, err := configfile.ReadConfigFile(configFilename)
   if err != nil {
     fmt.Errorf("Couldn't read config file %s because: %#v", configFilename, err)
   }
   
+  // Read configuration file
   debug, _ := config.GetBool("default", "debug")
   host, _ := config.GetString("kafka", "host")
   port, _ := config.GetString("kafka", "port")
+  hostname := fmt.Sprintf("%s:%s", host, port)
   maxSize, _ := config.GetInt64("kafka", "maxmessagesize")
   tempfilePath, _ := config.GetString("default", "filebufferpath")
   topicsRaw, _ := config.GetString("kafka", "topics")
@@ -77,66 +82,91 @@ func main() {
   partitionStrings := strings.Split(partitionsRaw, ",")
   partitions := make([]int64, len(partitionStrings))
   for i, _ := range partitionStrings { partitions[i], _ = strconv.ParseInt(strings.TrimSpace(partitionStrings[i]),10,64) }
-
-  hostname := fmt.Sprintf("%s:%s", host, port)
-  
-  topic := topics[0] // TMP FIXME
-  partition := partitions[0] // TMP FIXME
-  consumerForever := true // TMP FIXME
-  
-  fmt.Println("Consuming Messages :")
-  fmt.Printf("From: %s, topic: %s, partition: %d\n", hostname, topic, partition)
-  fmt.Println(" ---------------------- ")
-  broker := kafka.NewBrokerConsumer(hostname, topic, int(partition), offset, uint32(maxSize))
-  
-
-  
-  var payloadFile *os.File = nil
-  payloadFile, err = ioutil.TempFile(tempfilePath, "kafka-s3-go-consumer-buffer")
-  if err != nil {
-    fmt.Println("Error opening file: ", err)
-    payloadFile = nil
+  offsetStrings := strings.Split(offsetsRaw, ",")
+  offsets := make([]int64, len(topics))
+  for i, _ := range topics { 
+    if i >= len(offsetStrings) {
+      offsets[i] = 0
+    } else {
+      offsets[i], _ = strconv.ParseInt(strings.TrimSpace(offsetStrings[i]),10,64)
+    }
   }
 
-  consumerCallback := func(msg *kafka.Message) {
+  
+  if debug {
+    fmt.Printf("Read %d topics, setting up a consumer for each.\n", len(topics))
+  }
+  brokers := make([]*kafka.BrokerConsumer, len(topics))
+  for i, _ := range partitionStrings { 
     if debug {
-      msg.Print()
+      fmt.Printf("Consumer[%s #%d]:: topic: %s, partition: %d, offset: %d, maxMessageSize: %d\n", hostname, i, topics[i], partitions[i], offsets[i], maxSize)
     }
-    if payloadFile != nil {
-      payloadFile.Write([]byte(fmt.Sprintf("Message at: %d\n", msg.Offset())))
-      payloadFile.Write(msg.Payload())
-      payloadFile.Write([]byte("\n-------------------------------\n"))
+    brokers[i] = kafka.NewBrokerConsumer(hostname, topics[i], int(partitions[i]), uint64(offsets[i]), uint32(maxSize)) 
+  }
+  
+  
+  if debug {
+    fmt.Printf("Created %d brokers, opening a buffer file for each.\n", len(brokers))
+  }
+  buffers := make([]*os.File, len(brokers))
+  for i, _ := range brokers {
+    bufferFilename := fmt.Sprintf("kafka-s3-go-consumer-buffer-topic_%s-partition_%d-offset_%d", topics[i], partitions[i], offsets[i])
+    buffers[i], err = ioutil.TempFile(tempfilePath, bufferFilename)
+    if err != nil {
+      fmt.Errorf("Error opening buffer file: %#v", err)
+      os.Exit(1)
+    }
+    if debug {
+      fmt.Printf("Consumer[%s #%d]:: buffer-file: %s\n", hostname, i, buffers[i].Name())
     }
   }
 
-  if consumerForever {
-    quit := make(chan bool, 1)
-    go func() {
-      sigChan := make(chan os.Signal)
-      signal.Notify(sigChan)
+  quitSignals := make(chan bool, len(brokers))
+  for _ = range brokers {
+    go func() { // setup quit notifiers for SIGINT
+      signalChannel := make(chan os.Signal)
+      signal.Notify(signalChannel)
       for {
-        sig := <-sigChan
+        sig := <-signalChannel
         if sig == syscall.SIGINT {
-          quit <- true
+          quitSignals <- true
         }
       }
     }()
+  }
 
-    msgChan := make(chan *kafka.Message)
-    go broker.ConsumeOnChannel(msgChan, 10, quit)
-    for msg := range msgChan {
+  for i, broker := range brokers {
+    messageChannel := make(chan *kafka.Message)
+    go broker.ConsumeOnChannel(messageChannel, 10, quitSignals)
+    for msg := range messageChannel {
       if msg != nil {
-        consumerCallback(msg)
+        if debug {
+          fmt.Printf("`%s` } ", topics[i])
+          msg.Print()
+        }
+        buffers[i].Write(msg.Payload())
+        buffers[i].Write([]byte("\n"))
       } else {
         break
       }
     }
-  } else {
-    broker.Consume(consumerCallback)
   }
 
-  if payloadFile != nil {
-    payloadFile.Close()
+  for _, bufferFile := range buffers {
+    if debug {
+      fmt.Printf("Closing buffer-file: %s\n", bufferFile.Name())
+    }
+    bufferFile.Close()
+    
+    if !keepBufferFiles {
+      if debug {
+        fmt.Printf("Deleting buffer-file: %s\n", bufferFile.Name())
+      }
+      err = os.Remove(bufferFile.Name())
+      if err != nil {
+        fmt.Errorf("Error deleting buffer file %s: %#v", bufferFile.Name(), err)
+      }
+    }
   }
 
 }
