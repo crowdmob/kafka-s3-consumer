@@ -72,7 +72,7 @@ func saveToS3(s3bucket *s3.Bucket, bufferFile *os.File, topic *string, partition
   alreadyExists := true
   
   for alreadyExists {
-    s3path = fmt.Sprintf("%s/p%d/%d", topic, partition, time.Now().UnixNano())
+    s3path = fmt.Sprintf("%s/p%d/%d", *topic, partition, time.Now().UnixNano())
     alreadyExists, err = s3bucket.Exists(s3path)
     // if err != nil {
     //   panic(err)
