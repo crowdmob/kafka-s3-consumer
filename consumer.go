@@ -118,7 +118,7 @@ func main() {
   }
   buffers := make([]*os.File, len(brokers))
   for i, _ := range brokers {
-    bufferFilename := fmt.Sprintf("kafka-s3-go-consumer-buffer-topic_%s-partition_%d-offset_%d", topics[i], partitions[i], offsets[i])
+    bufferFilename := fmt.Sprintf("kafka-s3-go-consumer-buffer-topic_%s-partition_%d-offset_%d-", topics[i], partitions[i], offsets[i])
     buffers[i], err = ioutil.TempFile(tempfilePath, bufferFilename)
     if err != nil {
       fmt.Errorf("Error opening buffer file: %#v\n", err)
