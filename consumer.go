@@ -74,6 +74,7 @@ func saveToS3(s3bucket *s3.Bucket, bufferFile *os.File, topic *string, partition
     s3path = fmt.Sprintf("%s/p%d/%d", topic, partition, time.Now().UnixNano())
     alreadyExists, err = s3bucket.Exists(s3path)
     if err != nil {
+      panic(err)
       return false, err
     }
   } 
@@ -83,6 +84,9 @@ func saveToS3(s3bucket *s3.Bucket, bufferFile *os.File, topic *string, partition
     return false, err
   }
   
+  if debug {
+    fmt.Printf("Going to write to s3: %s//%s\n", s3bucket.Name, s3path)
+  }
   err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(bufferFile.Name())), s3.Private)
   return (err != nil), err
 }
