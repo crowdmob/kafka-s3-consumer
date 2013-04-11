@@ -69,7 +69,19 @@ func init() {
 func saveToS3(s3bucket *s3.Bucket, bufferFile *os.File, topic *string, partition int64) (bool, error) {
   var s3path string
   var err error
-  alreadyExists := true
+  
+  
+  contents, err := ioutil.ReadFile(bufferFile.Name())
+  if err != nil {
+    return false, err
+  }
+  
+  if len(contents) <= 0 {
+    if debug {
+      fmt.Printf("Nothing to store to s3 for: %s\n", bufferFile.Name())
+    }
+    return true, nil
+  }
   
   for alreadyExists {
     s3path = fmt.Sprintf("%s/p%d/%d", *topic, partition, time.Now().UnixNano())
@@ -79,12 +91,8 @@ func saveToS3(s3bucket *s3.Bucket, bufferFile *os.File, topic *string, partition
     //   return false, err
     // }
   } 
-  
-  contents, err := ioutil.ReadFile(bufferFile.Name())
-  if err != nil {
-    return false, err
-  }
-  
+
+  alreadyExists := true
   if debug {
     fmt.Printf("Going to write to s3: %s//%s\n", s3bucket.Name, s3path)
   }
@@ -224,9 +232,10 @@ func main() {
 
       cleanDoneSignals <- true
     }()
+  
+    // wait for all cleanup
+    <-cleanDoneSignals
   }
   
-  // wait for all cleanup
-  <-cleanDoneSignals
 
 }
