@@ -192,6 +192,8 @@ func main() {
     }
   }
 
+
+  cleanDoneSignals := make(chan bool, len(buffers))
   for i, bufferFile := range buffers {
     go func() {
       if debug {
@@ -211,7 +213,12 @@ func main() {
           fmt.Errorf("Error deleting buffer file %s: %#v", bufferFile.Name(), err)
         }
       }
+
+      cleanDoneSignals <- true
     }()
   }
+  
+  // wait for all cleanup
+  <-cleanDoneSignals
 
 }
