@@ -93,7 +93,6 @@ func saveToS3(s3bucket *s3.Bucket, bufferFile *os.File, topic *string, partition
     // }
   } 
 
-  alreadyExists := true
   if debug {
     fmt.Printf("Going to write to s3: %s//%s\n", s3bucket.Name, s3path)
   }
