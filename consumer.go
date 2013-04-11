@@ -114,7 +114,7 @@ func main() {
     buffers[i], err = ioutil.TempFile(tempfilePath, bufferFilename)
     if err != nil {
       fmt.Errorf("Error opening buffer file: %#v", err)
-      os.Exit(1)
+      panic(err)
     }
     if debug {
       fmt.Printf("Consumer[%s #%d]:: buffer-file: %s\n", hostname, i, buffers[i].Name())
