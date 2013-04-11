@@ -9,6 +9,7 @@ Several dependencies:
 
 ```bash
   sudo /usr/local/go/bin/go get github.com/crowdmob/goconfig
+  sudo /usr/local/go/bin/go get github.com/crowdmob/goamz/s3
 ```
 
 Run

@@ -46,8 +46,13 @@ import (
   "io/ioutil"
   "strings"
   "strconv"
+  "time"
+  "mime"
+  "path/filepath"
   
   configfile "github.com/crowdmob/goconfig"
+  "github.com/crowdmob/goamz/aws"
+  "github.com/crowdmob/goamz/s3"
 )
 
 var configFilename string
@@ -60,12 +65,35 @@ func init() {
 	flag.BoolVar(&keepBufferFiles, "k", false, "keep buffer files around for inspection")
 }
 
+func saveToS3(s3bucket *s3.Bucket, bufferFile *os.File, topic *string, partition int64) (bool, error) {
+  var s3path string
+  var err error
+  alreadyExists := true
+  
+  for alreadyExists {
+    s3path = fmt.Sprintf("%s/p%d/%d", topic, partition, time.Now().UnixNano())
+    alreadyExists, err = s3bucket.Exists(s3path)
+    if err != nil {
+      return false, err
+    }
+  } 
+  
+  contents, err := ioutil.ReadFile(bufferFile.Name())
+  if err != nil {
+    return false, err
+  }
+  
+  err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(bufferFile.Name())), s3.Private)
+  return (err != nil), err
+}
+
 func main() {
   // Read argv
   flag.Parse()
   config, err := configfile.ReadConfigFile(configFilename)
   if err != nil {
-    fmt.Errorf("Couldn't read config file %s because: %#v", configFilename, err)
+    fmt.Errorf("Couldn't read config file %s because: %#v\n", configFilename, err)
+    panic(err)
   }
   
   // Read configuration file
@@ -73,6 +101,11 @@ func main() {
   host, _ := config.GetString("kafka", "host")
   port, _ := config.GetString("kafka", "port")
   hostname := fmt.Sprintf("%s:%s", host, port)
+  awsKey, _ := config.GetString("s3", "accesskey")
+  awsSecret, _ := config.GetString("s3", "secretkey")
+  awsRegion, _ := config.GetString("s3", "region")
+  s3BucketName, _ := config.GetString("s3", "bucket")
+  s3bucket := s3.New(aws.Auth{awsKey, awsSecret}, aws.Regions[awsRegion]).Bucket(s3BucketName)
   maxSize, _ := config.GetInt64("kafka", "maxmessagesize")
   tempfilePath, _ := config.GetString("default", "filebufferpath")
   topicsRaw, _ := config.GetString("kafka", "topics")
@@ -91,7 +124,6 @@ func main() {
       offsets[i], _ = strconv.ParseInt(strings.TrimSpace(offsetStrings[i]),10,64)
     }
   }
-
   
   if debug {
     fmt.Printf("Read %d topics, setting up a consumer for each.\n", len(topics))
@@ -160,21 +192,26 @@ func main() {
     }
   }
 
-  for _, bufferFile := range buffers {
-    if debug {
-      fmt.Printf("Closing buffer-file: %s\n", bufferFile.Name())
-    }
-    bufferFile.Close()
-    
-    if !keepBufferFiles {
+  for i, bufferFile := range buffers {
+    go func() {
       if debug {
-        fmt.Printf("Deleting buffer-file: %s\n", bufferFile.Name())
+        fmt.Printf("Closing buffer-file: %s\n", bufferFile.Name())
       }
-      err = os.Remove(bufferFile.Name())
-      if err != nil {
-        fmt.Errorf("Error deleting buffer file %s: %#v", bufferFile.Name(), err)
+      bufferFile.Close()
+    
+      // Write anything remaining to s3
+      saveToS3(s3bucket, bufferFile, &topics[i], partitions[i])
+    
+      if !keepBufferFiles {
+        if debug {
+          fmt.Printf("Deleting buffer-file: %s\n", bufferFile.Name())
+        }
+        err = os.Remove(bufferFile.Name())
+        if err != nil {
+          fmt.Errorf("Error deleting buffer file %s: %#v", bufferFile.Name(), err)
+        }
       }
-    }
+    }()
   }
 
 }
