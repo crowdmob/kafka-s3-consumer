@@ -132,25 +132,25 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
     if debug {
       fmt.Printf("Nothing to store to s3 for bufferfile: %s\n", chunkBuffer.File.Name())
     }
-    return true, nil
-  }
-  
-  alreadyExists := true
-  for alreadyExists {
-    s3path = fmt.Sprintf("%s/p%d/%d", *chunkBuffer.Topic, chunkBuffer.Partition, time.Now().UnixNano())
-    alreadyExists, err = s3bucket.Exists(s3path)
+  } else {  // Write to s3 in a new filename
+    alreadyExists := true
+    for alreadyExists {
+      s3path = fmt.Sprintf("%s/p%d/%d", *chunkBuffer.Topic, chunkBuffer.Partition, time.Now().UnixNano())
+      alreadyExists, err = s3bucket.Exists(s3path)
+      if err != nil {
+        panic(err)
+        return false, err
+      }
+    } 
+
+    if debug {
+      fmt.Printf("Going to write to s3: %s.s3.amazonaws.com/%s with mimetype:%s\n", s3bucket.Name, s3path, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())))
+    }
+    
+    err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())), s3.Private)
     if err != nil {
       panic(err)
-      return false, err
     }
-  } 
-
-  if debug {
-    fmt.Printf("Going to write to s3: %s.s3.amazonaws.com/%s with mimetype:%s\n", s3bucket.Name, s3path, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())))
-  }
-  err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())), s3.Private)
-  if err != nil {
-    panic(err)
   }
   
   if !keepBufferFiles {
