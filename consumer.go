@@ -123,9 +123,7 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
       }
     } 
 
-    if debug {
-      fmt.Printf("Going to write to s3: %s.s3.amazonaws.com/%s with mimetype:%s\n", s3bucket.Name, s3path, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())))
-    }
+    fmt.Printf("S3 Put Object: { Bucket: %s, Key: %s, MimeType:%s }\n", s3bucket.Name, s3path, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())))
     
     err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())), s3.Private)
     if err != nil {
@@ -169,7 +167,7 @@ func main() {
   flag.Parse()
   config, err := configfile.ReadConfigFile(configFilename)
   if err != nil {
-    fmt.Errorf("Couldn't read config file %s because: %#v\n", configFilename, err)
+    fmt.Printf("Couldn't read config file %s because: %#v\n", configFilename, err)
     panic(err)
   }
   
@@ -281,16 +279,14 @@ func main() {
   }
   brokers := make([]*kafka.BrokerConsumer, len(topics))
   for i, _ := range partitionStrings { 
-    if debug {
-      fmt.Printf("Consumer[%s#%d][broker]: { topic: %s, partition: %d, offset: %d, maxMessageSize: %d }\n", 
-        hostname, 
-        i,
-        topics[i], 
-        partitions[i], 
-        offsets[i], 
-        maxSize,
-      )
-    }
+    fmt.Printf("Setup Consumer[%s#%d]: { topic: %s, partition: %d, offset: %d, maxMessageSize: %d }\n", 
+      hostname, 
+      i,
+      topics[i], 
+      partitions[i], 
+      offsets[i], 
+      maxSize,
+    )
     brokers[i] = kafka.NewBrokerConsumer(hostname, topics[i], int(partitions[i]), uint64(offsets[i]), uint32(maxSize)) 
   }
 
