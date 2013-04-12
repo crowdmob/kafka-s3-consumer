@@ -186,7 +186,7 @@ func main() {
     fmt.Printf("Fetching offsets for each topic from s3 bucket %s ...\n", s3bucket.Name)
   }
   offsets := make([]uint64, len(topics))
-  for i, _ = range offsets {
+  for i, _ := range offsets {
     prefix := S3TopicPartitionPrefix(&topics[i], partitions[i])
     if debug {
       fmt.Printf("  Looking at %s object versions: ", prefix)
@@ -222,7 +222,10 @@ func main() {
         if strings.HasPrefix(lines[l], guidPrefix) { // found a line with a guid, extract offset and escape out
           guidSplits := strings.SplitN(strings.SplitN(lines[l], "|", 2)[0], guidPrefix, 2)
           offsetString := guidSplits[len(guidSplits)-1]
-          offsets[i] = strconv.ParseUint(offsetString, 10, 64)
+          offsets[i], err = strconv.ParseUint(offsetString, 10, 64)
+          if err != nil {
+            panic (err)
+          }
           if debug {
             fmt.Printf("OffsetString:%s(L#%d), Offset:%d\n", offsetString, l, offsets[i])
           }
