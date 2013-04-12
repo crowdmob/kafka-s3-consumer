@@ -13,6 +13,9 @@ Several dependencies:
   sudo /usr/local/go/bin/go get github.com/crowdmob/goamz/s3
 ```
 
+Don't forget to make your own config file, by copying and updating the example one, found at `consumer.example.properties`.
+
+
 Run
 --------------------
 ```bash
