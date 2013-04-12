@@ -226,7 +226,7 @@ func main() {
       contentBytes, err := s3bucket.Get(latestKey)
       guidPrefix := KafkaMsgGuidPrefix(&topics[i], partitions[i])
       lines := strings.Split(string(contentBytes), "\n")
-      for l := len(lines)-1; l <= 0; l-- {
+      for l := len(lines)-1; l >= 0; l-- {
         if debug {
           fmt.Printf("    Looking at Line '%s'\n", lines[l])
         }
