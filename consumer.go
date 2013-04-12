@@ -228,7 +228,7 @@ func main() {
       lines := strings.Split(string(contentBytes), "\n")
       for l := len(lines)-1; l <= 0; l-- {
         if debug {
-          fmt.Printf("    Looking at Line `%s`\n", lines[l])
+          fmt.Printf("    Looking at Line '%s'\n", lines[l])
         }
         if strings.HasPrefix(lines[l], guidPrefix) { // found a line with a guid, extract offset and escape out
           guidSplits := strings.SplitN(strings.SplitN(lines[l], "|", 2)[0], guidPrefix, 2)
