@@ -81,7 +81,7 @@ type ChunkBuffer struct {
 }
 
 func (chunkBuffer *ChunkBuffer) BaseFilename() string {
-  return fmt.Sprintf("kafka-s3-go-consumer-buffer-topic_%s-partition_%d-offset_%d-", chunkBuffer.Topic, chunkBuffer.Partition, chunkBuffer.Offset)
+  return fmt.Sprintf("kafka-s3-go-consumer-buffer-topic_%s-partition_%d-offset_%d-", *chunkBuffer.Topic, chunkBuffer.Partition, chunkBuffer.Offset)
 }
 
 func (chunkBuffer *ChunkBuffer) CreateBufferFileOrPanic() {
