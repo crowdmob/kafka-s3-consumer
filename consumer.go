@@ -75,7 +75,7 @@ type ChunkBuffer struct {
   MaxSizeInBytes  int64
   Topic           *string
   Partition       int64
-  Offset          int64
+  Offset          uint64
   expiresAt       int64
   length          int64
 }
