@@ -208,12 +208,12 @@ func main() {
   partitions := make([]int64, len(partitionStrings))
   for i, _ := range partitionStrings { partitions[i], _ = strconv.ParseInt(strings.TrimSpace(partitionStrings[i]),10,64) }
   offsetStrings := strings.Split(offsetsRaw, ",")
-  offsets := make([]int64, len(topics))
+  offsets := make([]uint64, len(topics))
   for i, _ := range topics { 
     if i >= len(offsetStrings) {
       offsets[i] = 0
     } else {
-      offsets[i], _ = strconv.ParseInt(strings.TrimSpace(offsetStrings[i]),10,64)
+      offsets[i], _ = strconv.ParseUint(strings.TrimSpace(offsetStrings[i]),10,64)
     }
   }
   
