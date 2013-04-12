@@ -146,7 +146,7 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
   } 
 
   if debug {
-    fmt.Printf("Going to write to s3: %s.s3.amazonaws.com/%s\n", s3bucket.Name, s3path)
+    fmt.Printf("Going to write to s3: %s.s3.amazonaws.com/%s with mimetype:%s\n", *s3bucket.Name, s3path, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())))
   }
   err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())), s3.Private)
   if err != nil {
