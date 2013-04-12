@@ -137,7 +137,7 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
   
   alreadyExists := true
   for alreadyExists {
-    s3path = fmt.Sprintf("%s/p%d/%d", &chunkBuffer.Topic, chunkBuffer.Partition, time.Now().UnixNano())
+    s3path = fmt.Sprintf("%s/p%d/%d", *chunkBuffer.Topic, chunkBuffer.Partition, time.Now().UnixNano())
     alreadyExists, err = s3bucket.Exists(s3path)
     if err != nil {
       panic(err)
