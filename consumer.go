@@ -12,7 +12,6 @@ import (
   "github.com/crowdmob/kafka"
   "os"
   "os/signal"
-  "syscall"
   "io/ioutil"
   "strings"
   "strconv"
@@ -305,7 +304,7 @@ func main() {
     go func() {
       quitSignal := make(chan os.Signal, 1) 
       signal.Notify(quitSignal, os.Interrupt)
-      broker.ConsumeUntilQuit(kafkaPollSleepMilliSeconds, quitSignal, func(msg *kafka.Message){
+      consumedCount, skippedCount, err := broker.ConsumeUntilQuit(kafkaPollSleepMilliSeconds, quitSignal, func(msg *kafka.Message){
         if msg != nil {
           if debug {
             fmt.Printf("`%s` { ", topics[i])
@@ -340,9 +339,15 @@ func main() {
           }
         }
       })
+      
+      if err != nil {
+        fmt.Printf("ERROR in Broker#%d:\n", i)
+        panic(err)
+      }
 
       if debug {
         fmt.Printf("Quit signal handled by Broker Consumer #%d (Topic `%s`)\n", i, topics[i])
+        fmt.Printf("%s Report:  %d messages successfully consumed, %d messages skipped (typically corrupted, check logs)\n", topics[i], consumedCount, skippedCount)
       }
       
       // buffer stopped, let's clean up nicely
