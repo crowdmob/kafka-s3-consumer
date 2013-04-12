@@ -306,7 +306,7 @@ func main() {
             MaxAgeInMins: bufferMaxAgeInMinutes, 
             Topic: &topics[i], 
             Partition: partitions[i],
-            Offset: msg.Offset()
+            Offset: msg.Offset(),
           }
           buffers[i].CreateBufferFileOrPanic()
 
