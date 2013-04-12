@@ -349,7 +349,7 @@ func main() {
       buffers[i].StoreToS3AndRelease(s3bucket)
     
       brokerFinishes <- true
-    }
+    }()
   }
   
   <- brokerFinishes
