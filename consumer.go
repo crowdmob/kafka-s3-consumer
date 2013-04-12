@@ -147,13 +147,13 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
   return true, nil
 }
 
-func (bucket *s3.Bucket) LastKeyWithPrefix(prefix *string) (string, error) {
+func LastS3KeyWithPrefix(bucket *s3.Bucket, prefix *string) (string, error) {
   keyMarker := ""
   lastKey := ""
   moreResults := true
   for moreResults {
     results, err := bucket.List(*prefix, "", keyMarker, 0)
-    if err != nil { return nil, err }
+    if err != nil { return lastKey, err }
     lastKey = results.Contents[len(results.Contents)-1].Key
     moreResults = results.IsTruncated
   }
@@ -202,7 +202,7 @@ func main() {
     if debug {
       fmt.Printf("  Looking at %s object versions: ", prefix)
     }
-    latestKey := s3bucket.LastKeyWithPrefix(&prefix)
+    latestKey := LastS3KeyWithPrefix(s3bucket, &prefix)
     if err != nil { panic(err) }
 
     if debug {
