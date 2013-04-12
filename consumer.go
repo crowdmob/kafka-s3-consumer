@@ -312,19 +312,8 @@ func main() {
         break
       }
     }
+    
+    // buffer stopped, let's clean up nicely
+    buffers[i].StoreToS3AndRelease(s3bucket)
   }
-
-
-  cleanDoneSignals := make(chan bool, len(buffers))
-  for _, bufferFile := range buffers {
-    go func() {
-      bufferFile.StoreToS3AndRelease(s3bucket)
-      cleanDoneSignals <- true
-    }()
-  }
-  for _ = range buffers {
-    <-cleanDoneSignals // wait for all cleanup
-  }
-  
-
 }
