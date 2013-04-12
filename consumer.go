@@ -300,7 +300,7 @@ func main() {
     fmt.Printf("Brokers created, starting to listen with %d brokers...\n", len(brokers))
   }
 
-	brokerQuits := make(chan bool, len(brokers))
+	brokerFinishes := make(chan bool, len(brokers))
   for i, broker := range brokers {
     go func() {
       quitSignal := make(chan os.Signal, 1) 
@@ -336,19 +336,23 @@ func main() {
               fmt.Printf("Broker#%d: Rotating into %s\n", i, buffers[i].File.Name())
             }
 
-            go rotatedOutBuffer.StoreToS3AndRelease(s3bucket)
+            rotatedOutBuffer.StoreToS3AndRelease(s3bucket)
           }
         }
       })
-    
+
+      if debug {
+        fmt.Printf("Quit signal handled by Broker Consumer #%d (Topic `%s`)\n", i, topics[i])
+      }
+      
       // buffer stopped, let's clean up nicely
       buffers[i].StoreToS3AndRelease(s3bucket)
     
-      brokerQuits <- true
+      brokerFinishes <- true
     }
   }
   
-  <- brokerQuits
+  <- brokerFinishes
 
   fmt.Printf("All %d brokers finished.\n", len(brokers))
 }
