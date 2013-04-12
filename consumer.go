@@ -187,6 +187,7 @@ func main() {
   s3BucketName, _ := config.GetString("s3", "bucket")
   s3bucket := s3.New(aws.Auth{awsKey, awsSecret}, aws.Regions[awsRegion]).Bucket(s3BucketName)
 
+  kafkaPollSleepMilliSeconds, _ := config.GetInt64("kafka", "pollsleepmillis")
   maxSize, _ := config.GetInt64("kafka", "maxmessagesize")
   tempfilePath, _ := config.GetString("default", "filebufferpath")
   topicsRaw, _ := config.GetString("kafka", "topics")
@@ -294,66 +295,60 @@ func main() {
     brokers[i] = kafka.NewBrokerConsumer(hostname, topics[i], int(partitions[i]), uint64(offsets[i]), uint32(maxSize)) 
   }
 
-  quitSignals := make(chan bool, len(brokers))
-  for _ = range brokers {
-    go func() { // setup quit notifiers for SIGINT
-      signalChannel := make(chan os.Signal)
-      signal.Notify(signalChannel)
-      for {
-        sig := <-signalChannel
-        if sig == syscall.SIGINT {
-          quitSignals <- true
-        }
-      }
-    }()
-  }
   
   if debug {
-    fmt.Printf("Brokers created, quit signal listeners initialized, starting to listen with %d brokers...\n", len(brokers))
+    fmt.Printf("Brokers created, starting to listen with %d brokers...\n", len(brokers))
   }
+
+	brokerQuits := make(chan bool, len(brokers))
   for i, broker := range brokers {
-    messageChannel := make(chan *kafka.Message)
-    go broker.ConsumeOnChannel(messageChannel, 10, quitSignals)
-    for msg := range messageChannel {
-      if msg != nil {
-        if debug {
-          fmt.Printf("`%s` { ", topics[i])
-          msg.Print()
-          fmt.Printf("}\n")
-        }
-        buffers[i].PutMessage(msg)
-        
-        // check for max size and max age ... if over, rotate
-        // to new buffer file and upload the old one.
-        if buffers[i].NeedsRotation()  {
-          rotatedOutBuffer := buffers[i]
-
+    go func() {
+      quitSignal := make(chan os.Signal, 1) 
+      signal.Notify(quitSignal, os.Interrupt)
+      broker.ConsumeUntilQuit(kafkaPollSleepMilliSeconds, quitSignal, func(msg *kafka.Message){
+        if msg != nil {
           if debug {
-            fmt.Printf("Broker#%d: Log Rotation needed! Rotating out of %s\n", i, rotatedOutBuffer.File.Name())
+            fmt.Printf("`%s` { ", topics[i])
+            msg.Print()
+            fmt.Printf("}\n")
           }
+          buffers[i].PutMessage(msg)
+        
+          // check for max size and max age ... if over, rotate
+          // to new buffer file and upload the old one.
+          if buffers[i].NeedsRotation()  {
+            rotatedOutBuffer := buffers[i]
+
+            if debug {
+              fmt.Printf("Broker#%d: Log Rotation needed! Rotating out of %s\n", i, rotatedOutBuffer.File.Name())
+            }
             
-          buffers[i] = &ChunkBuffer{FilePath: &tempfilePath, 
-            MaxSizeInBytes: bufferMaxSizeInByes, 
-            MaxAgeInMins: bufferMaxAgeInMinutes, 
-            Topic: &topics[i], 
-            Partition: partitions[i],
-            Offset: msg.Offset(),
-          }
-          buffers[i].CreateBufferFileOrPanic()
+            buffers[i] = &ChunkBuffer{FilePath: &tempfilePath, 
+              MaxSizeInBytes: bufferMaxSizeInByes, 
+              MaxAgeInMins: bufferMaxAgeInMinutes, 
+              Topic: &topics[i], 
+              Partition: partitions[i],
+              Offset: msg.Offset(),
+            }
+            buffers[i].CreateBufferFileOrPanic()
 
-          if debug {
-            fmt.Printf("Broker#%d: Rotating into %s\n", i, buffers[i].File.Name())
-          }
+            if debug {
+              fmt.Printf("Broker#%d: Rotating into %s\n", i, buffers[i].File.Name())
+            }
 
-          go rotatedOutBuffer.StoreToS3AndRelease(s3bucket)
+            go rotatedOutBuffer.StoreToS3AndRelease(s3bucket)
+          }
         }
-        
-      } else {
-        break
-      }
-    }
+      })
     
-    // buffer stopped, let's clean up nicely
-    buffers[i].StoreToS3AndRelease(s3bucket)
+      // buffer stopped, let's clean up nicely
+      buffers[i].StoreToS3AndRelease(s3bucket)
+    
+      brokerQuits <- true
+    }
   }
+  
+  <- brokerQuits
+
+  fmt.Printf("All %d brokers finished.\n", len(brokers))
 }
