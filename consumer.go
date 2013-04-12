@@ -202,7 +202,7 @@ func main() {
     if debug {
       fmt.Printf("  Looking at %s object versions: ", prefix)
     }
-    latestKey := LastS3KeyWithPrefix(s3bucket, &prefix)
+    latestKey, err := LastS3KeyWithPrefix(s3bucket, &prefix)
     if err != nil { panic(err) }
 
     if debug {
