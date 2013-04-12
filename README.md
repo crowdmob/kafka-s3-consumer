@@ -8,6 +8,7 @@ Install
 Several dependencies:
 
 ```bash
+  sudo /usr/local/go/bin/go get github.com/crowdmob/kafka
   sudo /usr/local/go/bin/go get github.com/crowdmob/goconfig
   sudo /usr/local/go/bin/go get github.com/crowdmob/goamz/s3
 ```
@@ -15,8 +16,8 @@ Several dependencies:
 Run
 --------------------
 ```bash
-go run consumer.go -c <config_file_path> -o <comma_separated_offsets_per_topic>
+go run consumer.go -c <config_file_path> -k <true|false>
 ```
 
 * `-c` Defaults to conf.properties in the current working directory
-* `-o` Defaults to 0,0,0,... (a zero offset per topic specified in conf file)
+* `-k` Defaults to false and specifies wehther or not to keep chunkbuffer files around for inspection

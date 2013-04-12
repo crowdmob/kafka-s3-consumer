@@ -9,7 +9,7 @@ package main
 import (
   "flag"
   "fmt"
-  "github.com/jedsmith/kafka"
+  "github.com/crowdmob/kafka"
   "os"
   "os/signal"
   "syscall"
