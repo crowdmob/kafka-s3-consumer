@@ -146,7 +146,7 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
   } 
 
   if debug {
-    fmt.Printf("Going to write to s3: %s.s3.amazonaws.com/%s with mimetype:%s\n", *s3bucket.Name, s3path, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())))
+    fmt.Printf("Going to write to s3: %s.s3.amazonaws.com/%s with mimetype:%s\n", s3bucket.Name, s3path, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())))
   }
   err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())), s3.Private)
   if err != nil {
@@ -189,6 +189,11 @@ func main() {
   awsRegion, _ := config.GetString("s3", "region")
   s3BucketName, _ := config.GetString("s3", "bucket")
   s3bucket := s3.New(aws.Auth{awsKey, awsSecret}, aws.Regions[awsRegion]).Bucket(s3BucketName)
+
+  if debug {
+    fmt.Printf("Config: bucketName=%s and s3bucket.Name=%s", s3BucketName, s3bucket.Name)
+  }
+  
   maxSize, _ := config.GetInt64("kafka", "maxmessagesize")
   tempfilePath, _ := config.GetString("default", "filebufferpath")
   topicsRaw, _ := config.GetString("kafka", "topics")
