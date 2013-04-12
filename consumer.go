@@ -299,9 +299,10 @@ func main() {
     fmt.Printf("Brokers created, starting to listen with %d brokers...\n", len(brokers))
   }
 
+
 	brokerFinishes := make(chan bool, len(brokers))
-  for i, broker := range brokers {
-    go func() {
+  for idx, currentBroker := range brokers {
+    go func(i int, broker *kafka.BrokerConsumer) {
       quitSignal := make(chan os.Signal, 1) 
       signal.Notify(quitSignal, os.Interrupt)
       consumedCount, skippedCount, err := broker.ConsumeUntilQuit(kafkaPollSleepMilliSeconds, quitSignal, func(msg *kafka.Message){
@@ -354,7 +355,7 @@ func main() {
       buffers[i].StoreToS3AndRelease(s3bucket)
     
       brokerFinishes <- true
-    }()
+    }(idx, currentBroker)
   }
   
   <- brokerFinishes
