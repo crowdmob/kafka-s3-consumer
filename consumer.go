@@ -209,30 +209,19 @@ func main() {
   }
   
   if debug {
-    fmt.Printf("Read %d topics, setting up a consumer for each.\n", len(topics))
-  }
-  brokers := make([]*kafka.BrokerConsumer, len(topics))
-  for i, _ := range partitionStrings { 
-    if debug {
-      fmt.Printf("Consumer[%s #%d]:: topic: %s, partition: %d, offset: %d, maxMessageSize: %d\n", hostname, i, topics[i], partitions[i], offsets[i], maxSize)
-    }
-    brokers[i] = kafka.NewBrokerConsumer(hostname, topics[i], int(partitions[i]), uint64(offsets[i]), uint32(maxSize)) 
-  }
-  
-  if debug {
-    fmt.Printf("Making sure bufferfile directory structure exists at %s\n", tempfilePath)
+    fmt.Printf("Making sure chunkbuffer directory structure exists at %s\n", tempfilePath)
   }
   err = os.MkdirAll(tempfilePath, 0700)
   if err != nil {
-    fmt.Errorf("Error ensuring bufferfile directory structure %s: %#v\n", tempfilePath, err)
+    fmt.Errorf("Error ensuring chunkbuffer directory structure %s: %#v\n", tempfilePath, err)
     panic(err)
   }
   
   if debug {
-    fmt.Printf("Created %d brokers, opening a buffer file for each.\n", len(brokers))
+    fmt.Printf("Watching %d topics, opening a chunkbuffer for each.\n", len(topics))
   }
-  buffers := make([]*ChunkBuffer, len(brokers))
-  for i, _ := range brokers {
+  buffers := make([]*ChunkBuffer, len(topics))
+  for i, _ := range topics {
     buffers[i] = &ChunkBuffer{FilePath: &tempfilePath, 
       MaxSizeInBytes: bufferMaxSizeInByes, 
       MaxAgeInMins: bufferMaxAgeInMinutes, 
@@ -242,8 +231,27 @@ func main() {
     }
     buffers[i].CreateBufferFileOrPanic()
     if debug {
-      fmt.Printf("Consumer[%s#%d][bufferfile]: %s\n", hostname, i, buffers[i].File.Name())
+      fmt.Printf("Consumer[%s#%d][chunkbuffer]: %s\n", hostname, i, buffers[i].File.Name())
     }
+  }
+  
+  
+  if debug {
+    fmt.Printf("Setting up a broker for each of the %d topics.\n", len(topics))
+  }
+  brokers := make([]*kafka.BrokerConsumer, len(topics))
+  for i, _ := range partitionStrings { 
+    if debug {
+      fmt.Printf("Consumer[%s#%d][broker]: { topic: %s, partition: %d, offset: %d, maxMessageSize: %d }\n", 
+        hostname, 
+        i,
+        topics[i], 
+        partitions[i], 
+        offsets[i], 
+        maxSize,
+      )
+    }
+    brokers[i] = kafka.NewBrokerConsumer(hostname, topics[i], int(partitions[i]), uint64(offsets[i]), uint32(maxSize)) 
   }
 
   quitSignals := make(chan bool, len(brokers))
@@ -261,7 +269,7 @@ func main() {
   }
   
   if debug {
-    fmt.Printf("Buffer files created, starting to listen with %d brokers.\n", len(brokers))
+    fmt.Printf("Brokers created, quit signal listeners initialized, starting to listen with %d brokers...\n", len(brokers))
   }
   for i, broker := range brokers {
     messageChannel := make(chan *kafka.Message)
@@ -279,6 +287,11 @@ func main() {
         // to new buffer file and upload the old one.
         if buffers[i].NeedsRotation()  {
           rotatedOutBuffer := buffers[i]
+
+          if debug {
+            fmt.Printf("Broker#%d: Log Rotation needed! Rotating out of %s\n", i, rotatedOutBuffer.File.Name())
+          }
+            
           buffers[i] = &ChunkBuffer{FilePath: &tempfilePath, 
             MaxSizeInBytes: bufferMaxSizeInByes, 
             MaxAgeInMins: bufferMaxAgeInMinutes, 
@@ -287,9 +300,11 @@ func main() {
             Offset: offsets[i],
           }
           buffers[i].CreateBufferFileOrPanic()
+
           if debug {
-            fmt.Printf("Consumer[%s#%d][bufferfile]: %s\n", hostname, i, buffers[i].File.Name())
+            fmt.Printf("Broker#%d: Rotating into %s\n", i, buffers[i].File.Name())
           }
+
           go rotatedOutBuffer.StoreToS3AndRelease(s3bucket)
         }
         
