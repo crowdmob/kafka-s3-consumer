@@ -154,6 +154,11 @@ func LastS3KeyWithPrefix(bucket *s3.Bucket, prefix *string) (string, error) {
   for moreResults {
     results, err := bucket.List(*prefix, "", keyMarker, 0)
     if err != nil { return lastKey, err }
+    
+    if len(results.Contents) == 0 { // empty request, return last found lastKey
+      return lastKey, nil
+    }
+    
     lastKey = results.Contents[len(results.Contents)-1].Key
     moreResults = results.IsTruncated
   }
