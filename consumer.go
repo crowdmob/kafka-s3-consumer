@@ -147,7 +147,18 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
   return true, nil
 }
 
-
+func (bucket *s3.Bucket) LastKeyWithPrefix(prefix *string) (string, error) {
+  keyMarker := ""
+  lastKey := ""
+  moreResults := true
+  for moreResults {
+    results, err := bucket.List(*prefix, "", keyMarker, 0)
+    if err != nil { return nil, err }
+    lastKey = results.Contents[len(results.Contents)-1].Key
+    moreResults = results.IsTruncated
+  }
+  return lastKey, nil
+}
 
 func main() {
   // Read argv
@@ -191,31 +202,23 @@ func main() {
     if debug {
       fmt.Printf("  Looking at %s object versions: ", prefix)
     }
-    resp, err := s3bucket.Versions(prefix, "", "", "", 5)
+    latestKey := s3bucket.LastKeyWithPrefix(&prefix)
     if err != nil { panic(err) }
 
     if debug {
-      fmt.Printf("Got: %#v\n", resp)
+      fmt.Printf("Got: %#v\n", latestKey)
     }
     
-    latestUpdatedKey := ""
-    for _, version := range resp.Versions {
-      if version.IsLatest {
-        latestUpdatedKey = version.Key
-        continue
-      }
-    }
-    
-    if len(latestUpdatedKey) == 0 { // no keys found, there aren't any files written, so start at 0 offset
+    if len(latestKey) == 0 { // no keys found, there aren't any files written, so start at 0 offset
       offsets[i] = 0
       if debug {
         fmt.Printf("  No s3 object found, assuming Offset:%d\n", offsets[i])
       }
     } else { // if a key was found we have to open the object and find the last offset
       if debug {
-        fmt.Printf("  Found s3 object %s, got: ", latestUpdatedKey)
+        fmt.Printf("  Found s3 object %s, got: ", latestKey)
       }
-      contentBytes, err := s3bucket.Get(latestUpdatedKey)
+      contentBytes, err := s3bucket.Get(latestKey)
       guidPrefix := KafkaMsgGuidPrefix(&topics[i], partitions[i])
       lines := strings.Split(string(contentBytes), "\n")
       for l := len(lines)-1; l <= 0; l-- {
