@@ -137,7 +137,7 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
   
   alreadyExists := true
   for alreadyExists {
-    s3path = fmt.Sprintf("%s/p%d/%d", chunkBuffer.Topic, chunkBuffer.Partition, time.Now().UnixNano())
+    s3path = fmt.Sprintf("%s/p%d/%d", &chunkBuffer.Topic, chunkBuffer.Partition, time.Now().UnixNano())
     alreadyExists, err = s3bucket.Exists(s3path)
     if err != nil {
       panic(err)
@@ -191,7 +191,7 @@ func main() {
   s3bucket := s3.New(aws.Auth{awsKey, awsSecret}, aws.Regions[awsRegion]).Bucket(s3BucketName)
 
   if debug {
-    fmt.Printf("Config: bucketName=%s and s3bucket.Name=%s", s3BucketName, s3bucket.Name)
+    fmt.Printf("Config: bucketName=%s and s3bucket.Name=%s\n", s3BucketName, s3bucket.Name)
   }
   
   maxSize, _ := config.GetInt64("kafka", "maxmessagesize")
