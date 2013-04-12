@@ -1,36 +1,6 @@
 /*
 
-github.com/jedsmith/kafka: Go bindings for Kafka
-
-Copyright 2000-2011 NeuStar, Inc. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of NeuStar, Inc., Jed Smith, nor the names of
-    contributors may be used to endorse or promote products derived from
-    this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL NEUSTAR OR JED SMITH BE LIABLE FOR ANY DIRECT,
-INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
-OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-NeuStar, the Neustar logo and related names and logos are registered
-trademarks, service marks or tradenames of NeuStar, Inc. All other 
-product names, company names, marks, logos and symbols may be trademarks
-of their respective owners.  
+Author: Matthew Moore, CrowdMob Inc.
 
 */
 
@@ -56,14 +26,12 @@ import (
 )
 
 var configFilename string
-var offsetsRaw string
 var keepBufferFiles bool
 var debug bool
 const ONE_MINUTE_IN_NANOS = 60000000000
 
 func init() {
   flag.StringVar(&configFilename, "c", "conf.properties", "path to config file")
-	flag.StringVar(&offsetsRaw, "o", "0", "comma separated offsets to start consuming from for each topic")
 	flag.BoolVar(&keepBufferFiles, "k", false, "keep buffer files around for inspection")
 }
 
@@ -107,8 +75,16 @@ func (chunkBuffer *ChunkBuffer) NeedsRotation() bool {
   return chunkBuffer.TooBig() || chunkBuffer.TooOld()
 }
 
+func S3TopicPartitionPrefix(topic *string, partition int64) string {
+  return fmt.Sprintf("%s/p%d/", *topic, partition)
+}
+
+func KafkaMsgGuidPrefix(topic *string, partition int64) string {
+  return fmt.Sprintf("t_%s-p_%d-o_", *topic, partition)
+}
+
 func (chunkBuffer *ChunkBuffer) PutMessage(msg *kafka.Message) {
-  uuid := []byte(fmt.Sprintf("t_%s-p_%d-o_%d|", *chunkBuffer.Topic, chunkBuffer.Partition, msg.Offset()))
+  uuid := []byte(fmt.Sprintf("%s%d|", KafkaMsgGuidPrefix(chunkBuffer.Topic, chunkBuffer.Partition), msg.Offset()))
   lf := []byte("\n")
   chunkBuffer.Offset = msg.Offset()
   chunkBuffer.File.Write(uuid)
@@ -117,6 +93,7 @@ func (chunkBuffer *ChunkBuffer) PutMessage(msg *kafka.Message) {
 
   chunkBuffer.length += int64(len(uuid)) + int64(len(msg.Payload())) + int64(len(lf))
 }
+
 
 func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, error) {
   var s3path string
@@ -139,7 +116,7 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
   } else {  // Write to s3 in a new filename
     alreadyExists := true
     for alreadyExists {
-      s3path = fmt.Sprintf("%s/p%d/%d", *chunkBuffer.Topic, chunkBuffer.Partition, time.Now().UnixNano())
+      s3path = fmt.Sprintf("%s%d", S3TopicPartitionPrefix(chunkBuffer.Topic, chunkBuffer.Partition), time.Now().UnixNano())
       alreadyExists, err = s3bucket.Exists(s3path)
       if err != nil {
         panic(err)
@@ -194,10 +171,6 @@ func main() {
   s3BucketName, _ := config.GetString("s3", "bucket")
   s3bucket := s3.New(aws.Auth{awsKey, awsSecret}, aws.Regions[awsRegion]).Bucket(s3BucketName)
 
-  if debug {
-    fmt.Printf("Config: bucketName=%s and s3bucket.Name=%s\n", s3BucketName, s3bucket.Name)
-  }
-  
   maxSize, _ := config.GetInt64("kafka", "maxmessagesize")
   tempfilePath, _ := config.GetString("default", "filebufferpath")
   topicsRaw, _ := config.GetString("kafka", "topics")
@@ -207,15 +180,59 @@ func main() {
   partitionStrings := strings.Split(partitionsRaw, ",")
   partitions := make([]int64, len(partitionStrings))
   for i, _ := range partitionStrings { partitions[i], _ = strconv.ParseInt(strings.TrimSpace(partitionStrings[i]),10,64) }
-  offsetStrings := strings.Split(offsetsRaw, ",")
+
+  // Fetch Offsets from S3 (look for last written file and guid)
+  if debug {
+    fmt.Printf("Fetching offsets for each topic from s3 bucket %s ...\n", s3bucket.Name)
+  }
   offsets := make([]uint64, len(topics))
-  for i, _ := range topics { 
-    if i >= len(offsetStrings) {
+  for i, _ = range offsets {
+    prefix := S3TopicPartitionPrefix(&topics[i], partitions[i])
+    if debug {
+      fmt.Printf("  Looking at %s object versions: ", prefix)
+    }
+    resp, err := s3bucket.Versions(prefix, "", "", "", 5)
+    if err != nil { panic(err) }
+
+    if debug {
+      fmt.Printf("Got: %#v\n", resp)
+    }
+    
+    latestUpdatedKey := ""
+    for _, version := range resp.Versions {
+      if version.IsLatest {
+        latestUpdatedKey = version.Key
+        continue
+      }
+    }
+    
+    if len(latestUpdatedKey) == 0 { // no keys found, there aren't any files written, so start at 0 offset
       offsets[i] = 0
-    } else {
-      offsets[i], _ = strconv.ParseUint(strings.TrimSpace(offsetStrings[i]),10,64)
+      if debug {
+        fmt.Printf("  No s3 object found, assuming Offset:%d\n", offsets[i])
+      }
+    } else { // if a key was found we have to open the object and find the last offset
+      if debug {
+        fmt.Printf("  Found s3 object %s, got: ", latestUpdatedKey)
+      }
+      contentBytes, err := s3bucket.Get(latestUpdatedKey)
+      guidPrefix := KafkaMsgGuidPrefix(&topics[i], partitions[i])
+      lines := strings.Split(string(contentBytes), "\n")
+      for l := len(lines)-1; l <= 0; --l {
+        if strings.HasPrefix(lines[l], guidPrefix) { // found a line with a guid, extract offset and escape out
+          guidSplits := strings.SplitN(strings.SplitN(lines[l], "|", 2)[0], guidPrefix, 2)
+          offsetString := guidSplits[len(guidSplits)-1]
+          offsets[i] = strconv.ParseUint(offsetString, 10, 64)
+          if debug {
+            fmt.Printf("OffsetString:%s(L#%d), Offset:%d\n", offsetString, l, offsets[i])
+          }
+          break
+        }
+      }
     }
   }
+
+  
   
   if debug {
     fmt.Printf("Making sure chunkbuffer directory structure exists at %s\n", tempfilePath)
