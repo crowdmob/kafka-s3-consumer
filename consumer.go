@@ -107,11 +107,15 @@ func (chunkBuffer *ChunkBuffer) NeedsRotation() bool {
   return chunkBuffer.TooBig() || chunkBuffer.TooOld()
 }
 
-func (chunkBuffer *ChunkBuffer) Writeln(data []byte) {
-  chunkBuffer.File.Write(data)
-  chunkBuffer.File.Write([]byte("\n"))
+func (chunkBuffer *ChunkBuffer) PutMessage(msg *kafka.Message) {
+  uuid := []byte(fmt.Sprintf("t_%s-p_%d-o_%d|", *chunkBuffer.Topic, chunkBuffer.Partition, msg.Offset()))
+  lf := []byte("\n")
+  chunkBuffer.Offset = msg.Offset()
+  chunkBuffer.File.Write(uuid)
+  chunkBuffer.File.Write(msg.Payload())
+  chunkBuffer.File.Write(lf)
 
-  chunkBuffer.length += int64(len(data)) + int64(len([]byte("\n")))
+  chunkBuffer.length += int64(len(uuid)) + int64(len(msg.Payload())) + int64(len(lf))
 }
 
 func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, error) {
@@ -231,7 +235,7 @@ func main() {
       MaxSizeInBytes: bufferMaxSizeInByes, 
       MaxAgeInMins: bufferMaxAgeInMinutes, 
       Topic: &topics[i], 
-      Partition: partitions[i], 
+      Partition: partitions[i],
       Offset: offsets[i],
     }
     buffers[i].CreateBufferFileOrPanic()
@@ -286,7 +290,7 @@ func main() {
           msg.Print()
           fmt.Printf("}\n")
         }
-        buffers[i].Writeln(msg.Payload())
+        buffers[i].PutMessage(msg)
         
         // check for max size and max age ... if over, rotate
         // to new buffer file and upload the old one.
@@ -301,8 +305,8 @@ func main() {
             MaxSizeInBytes: bufferMaxSizeInByes, 
             MaxAgeInMins: bufferMaxAgeInMinutes, 
             Topic: &topics[i], 
-            Partition: partitions[i], 
-            Offset: offsets[i],
+            Partition: partitions[i],
+            Offset: msg.Offset()
           }
           buffers[i].CreateBufferFileOrPanic()
 
