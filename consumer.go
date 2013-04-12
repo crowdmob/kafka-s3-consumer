@@ -259,7 +259,10 @@ func main() {
       }
     }()
   }
-
+  
+  if debug {
+    fmt.Printf("Buffer files created, starting to listen with %d brokers.\n", len(brokers))
+  }
   for i, broker := range brokers {
     messageChannel := make(chan *kafka.Message)
     go broker.ConsumeOnChannel(messageChannel, 10, quitSignals)
