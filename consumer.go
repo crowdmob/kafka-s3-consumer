@@ -27,11 +27,16 @@ import (
 var configFilename string
 var keepBufferFiles bool
 var debug bool
-const ONE_MINUTE_IN_NANOS = 60000000000
+var shouldOutputVersion bool
+const (
+  VERSION = "0.1"
+  ONE_MINUTE_IN_NANOS = 60000000000
+)
 
 func init() {
   flag.StringVar(&configFilename, "c", "conf.properties", "path to config file")
 	flag.BoolVar(&keepBufferFiles, "k", false, "keep buffer files around for inspection")
+	flag.BoolVar(&shouldOutputVersion, "v", false, "output the current version and quit")
 }
 
 
@@ -165,6 +170,12 @@ func LastS3KeyWithPrefix(bucket *s3.Bucket, prefix *string) (string, error) {
 func main() {
   // Read argv
   flag.Parse()
+  
+  if shouldOutputVersion {
+    fmt.Printf("kafka-s3-consumer %s\n", VERSION)
+    os.Exit(0)
+  }
+  
   config, err := configfile.ReadConfigFile(configFilename)
   if err != nil {
     fmt.Printf("Couldn't read config file %s because: %#v\n", configFilename, err)
