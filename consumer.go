@@ -184,7 +184,7 @@ func main() {
   s3BucketName, _ := config.GetString("s3", "bucket")
   s3bucket := s3.New(aws.Auth{awsKey, awsSecret}, aws.Regions[awsRegion]).Bucket(s3BucketName)
 
-  kafkaPollSleepMilliSeconds, _ := config.GetInt64("kafka", "pollsleepmillis")
+  kafkaPollSleepMilliSeconds, _ := config.GetInt64("default", "pollsleepmillis")
   maxSize, _ := config.GetInt64("kafka", "maxmessagesize")
   tempfilePath, _ := config.GetString("default", "filebufferpath")
   topicsRaw, _ := config.GetString("kafka", "topics")
