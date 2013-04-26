@@ -17,7 +17,7 @@ go run consumer.go -c <config_file_path> -k <true|false>
 ```
 
 * `-c` Defaults to conf.properties in the current working directory
-* `-k` Defaults to false and specifies wehther or not to keep chunkbuffer files around for inspection
+* `-k` Defaults to false and specifies whether or not to keep chunkbuffer files around for inspection
 
 Deployment
 --------------------
