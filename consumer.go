@@ -1,7 +1,5 @@
 /*
-
 Author: Matthew Moore, CrowdMob Inc.
-
 */
 
 package main
@@ -31,6 +29,8 @@ var shouldOutputVersion bool
 const (
   VERSION = "0.1"
   ONE_MINUTE_IN_NANOS = 60000000000
+  S3_REWIND_IN_DAYS_BEFORE_LONG_LOOP = 14
+  DAY_IN_SECONDS = 24 * 60 * 60
 )
 
 func init() {
@@ -79,6 +79,10 @@ func (chunkBuffer *ChunkBuffer) NeedsRotation() bool {
   return chunkBuffer.TooBig() || chunkBuffer.TooOld()
 }
 
+func S3DatePrefix(t *time.Time) string {
+  return fmt.Sprintf("%d/%d/%d/", t.Year(), t.Month(), t.Day())
+}
+
 func S3TopicPartitionPrefix(topic *string, partition int64) string {
   return fmt.Sprintf("%s/p%d/", *topic, partition)
 }
@@ -120,7 +124,8 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
   } else {  // Write to s3 in a new filename
     alreadyExists := true
     for alreadyExists {
-      s3path = fmt.Sprintf("%s%d", S3TopicPartitionPrefix(chunkBuffer.Topic, chunkBuffer.Partition), time.Now().UnixNano())
+      writeTime := time.Now()
+      s3path = fmt.Sprintf("%s%s%d", S3TopicPartitionPrefix(chunkBuffer.Topic, chunkBuffer.Partition), S3DatePrefix(&writeTime), writeTime.UnixNano())
       alreadyExists, err = s3bucket.Exists(s3path)
       if err != nil {
         panic(err)
@@ -150,11 +155,26 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
 }
 
 func LastS3KeyWithPrefix(bucket *s3.Bucket, prefix *string) (string, error) {
+  narrowedPrefix := *prefix
   keyMarker := ""
+  
+  // First, do a few checks for shortcuts for checking backwards: focus in on the 14 days. 
+  // Otherwise just loop forward until there aren't any more results
+  currentDay := time.Now()
+  for i := 0; i < S3_REWIND_IN_DAYS_BEFORE_LONG_LOOP; i++ {
+    testPrefix := fmt.Sprintf("%s%s", *prefix, S3DatePrefix(&currentDay))
+    results, err := bucket.List(narrowedPrefix, "", keyMarker, 0)
+    if err != nil && len(results.Contents) > 0 {
+      narrowedPrefix = testPrefix
+      break
+    }
+    currentDay = currentDay.Add(-1 * time.Duration(DAY_IN_SECONDS) * time.Second)
+  }
+  
   lastKey := ""
   moreResults := true
   for moreResults {
-    results, err := bucket.List(*prefix, "", keyMarker, 0)
+    results, err := bucket.List(narrowedPrefix, "", keyMarker, 0)
     if err != nil { return lastKey, err }
     
     if len(results.Contents) == 0 { // empty request, return last found lastKey
@@ -162,14 +182,14 @@ func LastS3KeyWithPrefix(bucket *s3.Bucket, prefix *string) (string, error) {
     }
     
     lastKey = results.Contents[len(results.Contents)-1].Key
+    keyMarker = lastKey
     moreResults = results.IsTruncated
   }
   return lastKey, nil
 }
 
 func main() {
-  // Read argv
-  flag.Parse()
+  flag.Parse()  // Read argv
   
   if shouldOutputVersion {
     fmt.Printf("kafka-s3-consumer %s\n", VERSION)
