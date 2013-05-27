@@ -340,31 +340,31 @@ func main() {
             fmt.Printf("}\n")
           }
           buffers[i].PutMessage(msg)
-        
-          // check for max size and max age ... if over, rotate
-          // to new buffer file and upload the old one.
-          if buffers[i].NeedsRotation()  {
-            rotatedOutBuffer := buffers[i]
+        }
+      
+        // check for max size and max age ... if over, rotate
+        // to new buffer file and upload the old one.
+        if buffers[i].NeedsRotation()  {
+          rotatedOutBuffer := buffers[i]
 
-            if debug {
-              fmt.Printf("Broker#%d: Log Rotation needed! Rotating out of %s\n", i, rotatedOutBuffer.File.Name())
-            }
-            
-            buffers[i] = &ChunkBuffer{FilePath: &tempfilePath, 
-              MaxSizeInBytes: bufferMaxSizeInByes, 
-              MaxAgeInMins: bufferMaxAgeInMinutes, 
-              Topic: &topics[i], 
-              Partition: partitions[i],
-              Offset: msg.Offset(),
-            }
-            buffers[i].CreateBufferFileOrPanic()
-
-            if debug {
-              fmt.Printf("Broker#%d: Rotating into %s\n", i, buffers[i].File.Name())
-            }
-
-            rotatedOutBuffer.StoreToS3AndRelease(s3bucket)
+          if debug {
+            fmt.Printf("Broker#%d: Log Rotation needed! Rotating out of %s\n", i, rotatedOutBuffer.File.Name())
           }
+          
+          buffers[i] = &ChunkBuffer{FilePath: &tempfilePath, 
+            MaxSizeInBytes: bufferMaxSizeInByes, 
+            MaxAgeInMins: bufferMaxAgeInMinutes, 
+            Topic: &topics[i], 
+            Partition: partitions[i],
+            Offset: msg.Offset(),
+          }
+          buffers[i].CreateBufferFileOrPanic()
+
+          if debug {
+            fmt.Printf("Broker#%d: Rotating into %s\n", i, buffers[i].File.Name())
+          }
+
+          rotatedOutBuffer.StoreToS3AndRelease(s3bucket)
         }
       })
       
