@@ -135,7 +135,7 @@ func (chunkBuffer *ChunkBuffer) StoreToS3AndRelease(s3bucket *s3.Bucket) (bool, 
 
     fmt.Printf("S3 Put Object: { Bucket: %s, Key: %s, MimeType:%s }\n", s3bucket.Name, s3path, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())))
     
-    err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())), s3.Private)
+    err = s3bucket.Put(s3path, contents, mime.TypeByExtension(filepath.Ext(chunkBuffer.File.Name())), s3.Private, s3.Options{})
     if err != nil {
       panic(err)
     }
@@ -213,7 +213,7 @@ func main() {
   awsSecret, _ := config.GetString("s3", "secretkey")
   awsRegion, _ := config.GetString("s3", "region")
   s3BucketName, _ := config.GetString("s3", "bucket")
-  s3bucket := s3.New(aws.Auth{awsKey, awsSecret}, aws.Regions[awsRegion]).Bucket(s3BucketName)
+  s3bucket := s3.New(aws.Auth{AccessKey: awsKey, SecretKey: awsSecret}, aws.Regions[awsRegion]).Bucket(s3BucketName)
 
   kafkaPollSleepMilliSeconds, _ := config.GetInt64("default", "pollsleepmillis")
   maxSize, _ := config.GetInt64("kafka", "maxmessagesize")
